@@ -29,10 +29,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Key")
 	FName KeyID = NAME_None;
 
-	/** Show interaction prompt widget */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Key")
-	bool bShowInteractionPrompt = true;
-
 public:
 	// IInteractable interface
 	virtual void Interact_Implementation(AGauntlet_Character* Interactor) override;
