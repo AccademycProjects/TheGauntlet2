@@ -1,62 +1,74 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Game/Components/Requirements/Toggle_Req.h"
-#include "Game/Components/Requirements/RequirementComponent.h"
 #include "Game/Components/Activables/ToggleComponent.h"
 #include "Game/Characters/Gauntlet_Character.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 
 UToggle_Req::UToggle_Req()
 {
-	// Stub
+    // Stub
 }
 
 void UToggle_Req::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	// Find ToggleComponents on target actors
-	CachedToggleComponents.Empty();
+    CachedToggleComponents.Empty();
 
-	for (AActor* TargetActor : TargetActors)
-	{
-		if (!IsValid(TargetActor))
-			continue;
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
 
-		TArray<UToggleComponent*> Toggles;
-		TargetActor->GetComponents<UToggleComponent>(Toggles);
+    // Scan for actors with matching tags
+    for (const FName& Tag : TargetActorTags)
+    {
+        if (Tag.IsNone())
+            continue;
 
-		// Add the first toggle component found on each actor
-		if (Toggles.Num() > 0 && IsValid(Toggles[0]))
-		{
-			CachedToggleComponents.Add(Toggles[0]);
-		}
-	}
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            AActor* Actor = *It;
+            if (!IsValid(Actor))
+                continue;
+
+            if (!Actor->ActorHasTag(Tag))
+                continue;
+
+            // Search for Toggle Components on this actor
+            TArray<UToggleComponent*> Toggles;
+            Actor->GetComponents<UToggleComponent>(Toggles);
+
+            for (UToggleComponent* Toggle : Toggles)
+            {
+                if (IsValid(Toggle))
+                {
+                    CachedToggleComponents.Add(Toggle);
+                }
+            }
+        }
+    }
 }
 
 bool UToggle_Req::CheckRequirement_Implementation(AGauntlet_Character* Interactor)
 {
-	// If no toggles found, requirement is always satisfied
-	if (CachedToggleComponents.Num() == 0)
-	{
-		return true;
-	}
+    // No toggle components → always valid
+    if (CachedToggleComponents.Num() == 0)
+        return true;
 
-	const bool bRequiredState = (RequirementMode == EToggleRequirementMode::AllMustBeOn);
+    const bool bRequiredState = (RequirementMode == EToggleRequirementMode::AllMustBeOn);
 
-	// Check all cached toggle components
-	for (UToggleComponent* Toggle : CachedToggleComponents)
-	{
-		if (!IsValid(Toggle))
-			continue;
+    for (UToggleComponent* Toggle : CachedToggleComponents)
+    {
+        if (!IsValid(Toggle))
+            continue;
 
-		// If any toggle doesn't match the required state, requirement fails
-		if (Toggle->IsOn() != bRequiredState)
-		{
-			return false;
-		}
-	}
+        if (Toggle->IsOn() != bRequiredState)
+        {
+            return false;
+        }
+    }
 
-	// All toggles match the required state
-	return true;
+    return true;
 }

@@ -7,40 +7,37 @@
 #include "Toggle_Req.generated.h"
 
 class UToggleComponent;
-class AActor;
+class AGauntlet_Character;
 
 UENUM(BlueprintType)
 enum class EToggleRequirementMode : uint8
 {
-	AllMustBeOn,    // All toggles must be ON
-	AllMustBeOff    // All toggles must be OFF
+    AllMustBeOn,
+    AllMustBeOff
 };
 
-/**
- * Requirement component that checks if multiple ToggleComponents (on other actors) are in the required state
- */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class THEGAUNTLET2_API UToggle_Req : public URequirementComponent
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UToggle_Req();
+    UToggle_Req();
 
 protected:
-	virtual void BeginPlay() override;
+    virtual void BeginPlay() override;
 
-	/** Actors that contain ToggleComponents to check */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Toggle Requirement")
-	TArray<TObjectPtr<AActor>> TargetActors;
+    /** Tags of actors that contain ToggleComponents to check */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Toggle Requirement")
+    TArray<FName> TargetActorTags;
 
-	/** Requirement mode: all must be ON or all must be OFF */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Toggle Requirement")
-	EToggleRequirementMode RequirementMode = EToggleRequirementMode::AllMustBeOn;
+    /** Requirement mode */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Toggle Requirement")
+    EToggleRequirementMode RequirementMode = EToggleRequirementMode::AllMustBeOn;
 
-	/** Cached toggle components found on target actors */
-	UPROPERTY(Transient)
-	TArray<UToggleComponent*> CachedToggleComponents;
+    /** Cached toggle components found on target actors (runtime only) */
+    UPROPERTY(Transient)
+    TArray<UToggleComponent*> CachedToggleComponents;
 
-	virtual bool CheckRequirement_Implementation(class AGauntlet_Character* Interactor) override;
+    virtual bool CheckRequirement_Implementation(AGauntlet_Character* Interactor) override;
 };
