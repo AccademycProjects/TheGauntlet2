@@ -9,6 +9,9 @@
 class AGauntlet_Character;
 class AInteractableActor;
 
+// Forward declaration for delegate
+class UToggleComponent;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnToggleOn, UToggleComponent*, ToggleComponent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnToggleOff, UToggleComponent*, ToggleComponent);
 

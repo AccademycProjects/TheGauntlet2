@@ -6,7 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "RequirementComponent.generated.h"
 
-class AGauntletCharacter;
+class AGauntlet_Character;
 
 /**
  * Base component for requirements.
