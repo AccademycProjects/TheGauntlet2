@@ -6,12 +6,40 @@
 #include "Game/Components/Requirements/RequirementComponent.h"
 #include "Toggle_Req.generated.h"
 
+class UToggleComponent;
+class AActor;
+
+UENUM(BlueprintType)
+enum class EToggleRequirementMode : uint8
+{
+	AllMustBeOn,    // All toggles must be ON
+	AllMustBeOff    // All toggles must be OFF
+};
+
 /**
- * 
+ * Requirement component that checks if multiple ToggleComponents (on other actors) are in the required state
  */
-UCLASS()
+UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class THEGAUNTLET2_API UToggle_Req : public URequirementComponent
 {
 	GENERATED_BODY()
-	
+
+public:
+	UToggle_Req();
+
+protected:
+	virtual void BeginPlay() override;
+
+	/** Actors that contain ToggleComponents to check */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Toggle Requirement")
+	TArray<TObjectPtr<AActor>> TargetActors;
+
+	/** Requirement mode: all must be ON or all must be OFF */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Toggle Requirement")
+	EToggleRequirementMode RequirementMode = EToggleRequirementMode::AllMustBeOn;
+
+	/** Cached toggle components found on target actors */
+	TArray<TObjectPtr<UToggleComponent>> CachedToggleComponents;
+
+	virtual bool CheckRequirement_Implementation(class AGauntlet_Character* Interactor) override;
 };
