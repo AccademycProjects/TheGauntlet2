@@ -39,7 +39,8 @@ protected:
 	EToggleRequirementMode RequirementMode = EToggleRequirementMode::AllMustBeOn;
 
 	/** Cached toggle components found on target actors */
-	TArray<TObjectPtr<UToggleComponent>> CachedToggleComponents;
+	UPROPERTY(Transient)
+	TArray<UToggleComponent*> CachedToggleComponents;
 
 	virtual bool CheckRequirement_Implementation(class AGauntlet_Character* Interactor) override;
 };
