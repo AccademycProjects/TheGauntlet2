@@ -69,6 +69,10 @@ protected:
 	UFUNCTION()
 	void OnLifetimeExpired();
 
+	/** Called when the projectile hits something */
+	UFUNCTION()
+	void OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+
 	/** Reset the projectile to its default state */
 	void ResetProjectile();
 };

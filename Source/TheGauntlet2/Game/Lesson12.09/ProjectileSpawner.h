@@ -44,6 +44,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile Spawner")
 	bool bInitializePoolOnBeginPlay = true;
 
+	/** If true, print debug messages */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile Spawner", meta = (DisplayName = "Print Debug Messages"))
+	bool bPrintDebugMessages = false;
+
 	/** Reference to the pool subsystem */
 	UPROPERTY()
 	UObjectPoolSubsystem* PoolSubsystem;

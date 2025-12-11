@@ -5,8 +5,10 @@
 #include "Game/Lesson12.09/PooledProjectile.h"
 #include "Components/SceneComponent.h"
 #include "Components/ArrowComponent.h"
+#include "GameFramework/ProjectileMovementComponent.h"
 #include "Engine/World.h"
 #include "UObject/UObjectGlobals.h"
+#include "Game/Utility/Gauntlet_DebugHelper.h"
 
 AProjectileSpawner::AProjectileSpawner()
 {
@@ -73,31 +75,36 @@ void AProjectileSpawner::SpawnProjectileAtLocation(const FVector& Location, cons
 		}
 	}
 
-	if (!PoolSubsystem || !ProjectileClass)
+	if (!PoolSubsystem || !ProjectileClass || bPrintDebugMessages)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("AProjectileSpawner::SpawnProjectile - PoolSubsystem or ProjectileClass is null"));
+		UGauntlet_DebugHelper::ShowWarning(TEXT("ProjectileSpawner::SpawnProjectile - PoolSubsystem or ProjectileClass is null"));
 		return;
 	}
 
 	// Get projectile from pool
 	TScriptInterface<IObjectPoolInterface> PooledObject = PoolSubsystem->GetObjectFromPool(ProjectileClass);
 
-	if (!PooledObject.GetObject())
+	if (!PooledObject.GetObject() || bPrintDebugMessages)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("AProjectileSpawner::SpawnProjectile - Failed to get projectile from pool"));
+		UGauntlet_DebugHelper::ShowWarning(TEXT("ProjectileSpawner::SpawnProjectile - Failed to get projectile from pool"));
 		return;
 	}
-
+	
 	// Create activation data
 	FObjectPoolActivationData ActivationData;
 	ActivationData.ObjectPoolTransform = FTransform(Rotation, Location, FVector::OneVector);
 	ActivationData.ObjectPoolName = FName("SpawnedProjectile");
 	ActivationData.ObjectPoolID = FString::Printf(TEXT("Projectile_%d"), FMath::RandRange(1000, 9999));
-
+	
 	// Activate the projectile
 	if (IObjectPoolInterface* PoolInterface = Cast<IObjectPoolInterface>(PooledObject.GetObject()))
 	{
+		// Reset transform and movement before activation so the projectile always starts at the requested location
+		if (AActor* Actor = Cast<AActor>(PooledObject.GetObject()))
+		{
+			Actor->SetActorLocationAndRotation(Location, Rotation);
+		}
+		
 		PoolInterface->Active(ActivationData);
 	}
 }
-

@@ -3,9 +3,11 @@
 #include "Game/Lesson12.09/PooledProjectile.h"
 #include "Game/Lesson12.09/ObjectPoolSubsystem.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Game/Utility/Gauntlet_DebugHelper.h"
 #include "UObject/UObjectGlobals.h"
 
 APooledProjectile::APooledProjectile()
@@ -22,6 +24,7 @@ APooledProjectile::APooledProjectile()
 	ProjectileMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
 	ProjectileMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
 	ProjectileMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Ignore);
+	ProjectileMesh->SetNotifyRigidBodyCollision(true); // enable hit events
 
 	// Create projectile movement component
 	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
@@ -31,6 +34,8 @@ APooledProjectile::APooledProjectile()
 	ProjectileMovement->bRotationFollowsVelocity = true;
 	ProjectileMovement->bShouldBounce = false;
 	ProjectileMovement->ProjectileGravityScale = 0.0f; // No gravity by default
+	ProjectileMovement->bAutoActivate = false; // do not auto-start on spawn
+	ProjectileMovement->SetAutoActivate(false);
 
 	bIsActive = false;
 }
@@ -45,6 +50,12 @@ void APooledProjectile::BeginPlay()
 		PoolSubsystem = World->GetSubsystem<UObjectPoolSubsystem>();
 	}
 
+	// Bind hit event to return to pool on impact
+	if (ProjectileMesh)
+	{
+		ProjectileMesh->OnComponentHit.AddDynamic(this, &APooledProjectile::OnProjectileHit);
+	}
+
 	// Initially in pool - visible but inactive
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(false);
@@ -54,7 +65,7 @@ void APooledProjectile::BeginPlay()
 void APooledProjectile::NativeActive(FObjectPoolActivationData ObjectPoolData)
 {
 	// Reset the projectile
-	ResetProjectile();
+	//ResetProjectile();
 
 	// Set transform from activation data
 	if (!ObjectPoolData.ObjectPoolTransform.Equals(FTransform::Identity))
@@ -71,7 +82,11 @@ void APooledProjectile::NativeActive(FObjectPoolActivationData ObjectPoolData)
 	FVector Direction = ObjectPoolData.ObjectPoolTransform.GetRotation().GetForwardVector();
 	if (!Direction.IsNearlyZero())
 	{
+		ProjectileMovement->Deactivate();
 		ProjectileMovement->Velocity = Direction * InitialSpeed;
+		ProjectileMovement->SetUpdatedComponent(RootComponent);
+		//ProjectileMovement->SetVelocityInLocalSpace(Direction * InitialSpeed);
+		ProjectileMovement->UpdateComponentVelocity();
 		ProjectileMovement->Activate();
 	}
 
@@ -129,34 +144,81 @@ void APooledProjectile::NativeDeactive(FObjectPoolDeactivationData DeactivationD
 void APooledProjectile::OnLifetimeExpired()
 {
 	// Return to pool when lifetime expires
-	if (PoolSubsystem && bIsActive)
+	if (!bIsActive)
+	{
+		return;
+	}
+
+	if (!PoolSubsystem)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			PoolSubsystem = World->GetSubsystem<UObjectPoolSubsystem>();
+		}
+	}
+
+	if (PoolSubsystem)
 	{
 		FObjectPoolDeactivationData DeactivationData;
 		DeactivationData.DeactivationReason = FName("LifetimeExpired");
 		DeactivationData.bShouldResetTransform = true;
 
-		// Find the class in the pool map and return this actor
-		if (UWorld* World = GetWorld())
-		{
-			UObjectPoolSubsystem* Subsystem = World->GetSubsystem<UObjectPoolSubsystem>();
-			if (Subsystem)
-			{
-				// We need to find which class this projectile belongs to
-				// For now, we'll use GetClass()
-				TSubclassOf<AActor> ProjectileClass = GetClass();
-				TScriptInterface<IObjectPoolInterface> Interface = this;
-				Subsystem->ReturnObjectToPool(ProjectileClass, Interface);
-			}
-		}
+		TSubclassOf<AActor> ProjectileClass = GetClass();
+		TScriptInterface<IObjectPoolInterface> Interface = this;
+		PoolSubsystem->ReturnObjectToPool(ProjectileClass, Interface);
+	}
+
+	if(bPrintDebugMessages)
+	{
+		UGauntlet_DebugHelper::ShowWarning(TEXT("LIFETIME: Returned to pool"));
 	}
 }
 
 void APooledProjectile::ResetProjectile()
 {
-	// Reset velocity
+	// Reset velocity and movement component
+	ProjectileMovement->StopMovementImmediately();
 	ProjectileMovement->Velocity = FVector::ZeroVector;
 	ProjectileMovement->Deactivate();
-
+	ProjectileMovement->SetUpdatedComponent(RootComponent);
+	ProjectileMovement->SetVelocityInLocalSpace(FVector::ZeroVector);
+	ProjectileMovement->UpdateComponentVelocity();
+	ProjectileMovement->Activate();
+	
 	// Reset any other state if needed
 }
 
+void APooledProjectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+	if (!bIsActive)
+	{
+		return;
+	}
+
+	if (!PoolSubsystem)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			PoolSubsystem = World->GetSubsystem<UObjectPoolSubsystem>();
+		}
+	}
+
+	if (!PoolSubsystem)
+	{
+		return;
+	}
+
+	FObjectPoolDeactivationData DeactivationData;
+	DeactivationData.DeactivationReason = FName("Hit");
+	DeactivationData.DeactivationLocation = Hit.ImpactPoint;
+	DeactivationData.bShouldResetTransform = true;
+
+	TSubclassOf<AActor> ProjectileClass = GetClass();
+	TScriptInterface<IObjectPoolInterface> Interface = this;
+	PoolSubsystem->ReturnObjectToPool(ProjectileClass, Interface);
+
+	if(bPrintDebugMessages)
+	{
+		UGauntlet_DebugHelper::ShowWarning(TEXT("HIT: Returned to pool"));
+	}
+}

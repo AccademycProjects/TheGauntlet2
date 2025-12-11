@@ -16,6 +16,18 @@ struct FObjectPool
 {
 	GENERATED_BODY()
 
+	/** Desired base size of the pool (initial size) */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Object Pool Struct")
+	int32 BaseSize = 0;
+
+	/** Last time (seconds) a request for this pool was made */
+	UPROPERTY()
+	double LastRequestTime = 0.0;
+
+	/** Recent request timestamps used to estimate demand */
+	UPROPERTY()
+	TArray<double> RecentRequestTimes;
+
 	// Array with the pointers of the USABLE objects IN this pool
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Object Pool Struct")
 	TArray<TScriptInterface<IObjectPoolInterface>> UsablePoolingObjects;
@@ -59,6 +71,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	void AddPool(TSubclassOf<AActor> ClassPool, int32 InitialSize = 50);
 
+	/** Force a pre-warm/resize for a given class */
+	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
+	void PrewarmPool(TSubclassOf<AActor> ClassPool, int32 AdditionalSize);
+
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	TScriptInterface<IObjectPoolInterface> GetObjectFromPool(TSubclassOf<AActor> ClassPool);
 
@@ -75,6 +91,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
 	float PoolGridSpacing = 200.0f;
 
+	/** Time window (seconds) to estimate request rate */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
+	float AutoScaleWindowSeconds = 2.0f;
+
+	/** Look-ahead time (seconds) to pre-allocate before exhaustion */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
+	float AutoScaleLookaheadSeconds = 1.0f;
+
+	/** Minimum number of objects to add when scaling up */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
+	int32 AutoScaleMinAdd = 5;
+
+	/** Seconds of inactivity before shrinking back toward the base size */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
+	float InactivityShrinkSeconds = 10.0f;
+
 	/** Get statistics for all pools */
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	TArray<FPoolStatistics> GetPoolStatistics() const;
@@ -85,4 +117,13 @@ private:
 
 	// Check if a class is valid
 	bool IsClassValid(TSubclassOf<AActor> ClassPool) const;
+
+	// Spawn and add a number of actors to a pool (usable list) and place them in the grid
+	void SpawnAndPlaceInPool(TSubclassOf<AActor> ClassPool, int32 Count, FObjectPool& Pool);
+
+	// Record a request and optionally auto-scale the pool
+	void RecordUsageAndMaybeGrow(TSubclassOf<AActor> ClassPool, FObjectPool& Pool);
+
+	// Shrink pool towards base size after inactivity
+	void MaybeShrinkPool(TSubclassOf<AActor> ClassPool, FObjectPool& Pool);
 };
