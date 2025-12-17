@@ -1,79 +1,93 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Game/Lesson12.09/ObjectPoolInterface.h"
-#include "Components/StaticMeshComponent.h"
-#include "GameFramework/ProjectileMovementComponent.h"
 #include "PooledProjectile.generated.h"
 
+class USphereComponent;
+class UStaticMeshComponent;
+class UProjectileMovementComponent;
+class UObjectPoolSubsystem;
+
 /**
- * A projectile actor that implements the ObjectPoolInterface
- * Can be pooled and reused multiple times
+ * Pool-safe projectile actor.
+ * Uses a collision root for stable movement and pooling.
  */
 UCLASS()
-class THEGAUNTLET2_API APooledProjectile : public AActor, public IObjectPoolInterface
+class THEGAUNTLET2_API APooledProjectile
+	: public AActor
+	, public IObjectPoolInterface
 {
 	GENERATED_BODY()
-	
-public:	
-	APooledProjectile();
-
-protected:
-	/** Static mesh component for the projectile */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-	UStaticMeshComponent* ProjectileMesh;
-
-	/** Projectile movement component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-	UProjectileMovementComponent* ProjectileMovement;
-
-	/** Initial speed of the projectile */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
-	float InitialSpeed = 2000.0f;
-
-	/** Maximum speed of the projectile */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
-	float MaxSpeed = 2000.0f;
-
-	/** Lifetime of the projectile in seconds */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
-	float Lifetime = 5.0f;
-
-	/** Pool location where inactive projectiles are stored */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pool")
-	FVector PoolLocation = FVector(0.0f, 0.0f, -1000.0f);
-
-	/** Whether the projectile is currently active */
-	bool bIsActive = false;
-
-	/** Timer handle for lifetime */
-	FTimerHandle LifetimeTimerHandle;
-
-	/** Reference to the pool subsystem */
-	UPROPERTY()
-	class UObjectPoolSubsystem* PoolSubsystem;
 
 public:
-	// Begin IObjectPoolInterface implementation
+	APooledProjectile();
+
+	// IObjectPoolInterface
 	virtual void NativeActive(FObjectPoolActivationData ObjectPoolData) override;
 	virtual void NativeDeactive(FObjectPoolDeactivationData DeactivationData) override;
-	// End IObjectPoolInterface implementation
 
 protected:
 	virtual void BeginPlay() override;
 
-	/** Called when the projectile lifetime expires */
+protected:
+	/** Collision root component (movement + hit detection) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USphereComponent* CollisionRoot;
+
+	/** Visual mesh (no collision) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UStaticMeshComponent* ProjectileMesh;
+
+	/** Projectile movement component */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UProjectileMovementComponent* ProjectileMovement;
+
+	/** Initial speed of the projectile */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float InitialSpeed = 2000.f;
+
+	/** Maximum speed of the projectile */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float MaxSpeed = 2000.f;
+
+	/** Lifetime of the projectile */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float Lifetime = 5.f;
+
+	/** Pool location */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pool")
+	FVector PoolLocation = FVector(0, 0, -1000);
+
+	/** Whether the projectile is currently active */
+	bool bIsActive = false;
+
+	/** Lifetime timer */
+	FTimerHandle LifetimeTimerHandle;
+
+	/** Pool subsystem reference */
+	UPROPERTY()
+	UObjectPoolSubsystem* PoolSubsystem;
+
+protected:
+	/** Called when the projectile hits something */
+	UFUNCTION()
+	void OnProjectileHit(
+		UPrimitiveComponent* HitComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse,
+		const FHitResult& Hit
+	);
+
+	/** Called when lifetime expires */
 	UFUNCTION()
 	void OnLifetimeExpired();
 
-	/** Called when the projectile hits something */
-	UFUNCTION()
-	void OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+	/** Returns the projectile to the pool */
+	void ReturnToPool(FName Reason, const FVector& Location);
 
-	/** Reset the projectile to its default state */
+	/** Resets internal state */
 	void ResetProjectile();
 };
-

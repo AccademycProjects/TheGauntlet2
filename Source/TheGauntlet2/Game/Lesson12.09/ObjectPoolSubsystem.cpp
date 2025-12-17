@@ -1,8 +1,10 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Game/Lesson12.09/ObjectPoolSubsystem.h"
+#include "Game/Lesson12.09/ObjectPoolSettings.h"
 
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Stats/Stats.h"
 #include "UObject/UObjectGlobals.h"
 #include "TimerManager.h"
@@ -10,29 +12,7 @@
 
 #pragma region STATS
 
-DECLARE_STATS_GROUP(
-    TEXT("ObjectPool"),
-    STATGROUP_ObjectPool,
-    STATCAT_Advanced
-);
-
-DECLARE_DWORD_COUNTER_STAT(
-    TEXT("Total Pools"),
-    STAT_ObjectPool_TotalPools,
-    STATGROUP_ObjectPool
-);
-
-DECLARE_DWORD_COUNTER_STAT(
-    TEXT("Active Objects"),
-    STAT_ObjectPool_ActiveObjects,
-    STATGROUP_ObjectPool
-);
-
-DECLARE_DWORD_COUNTER_STAT(
-    TEXT("Free Objects"),
-    STAT_ObjectPool_FreeObjects,
-    STATGROUP_ObjectPool
-);
+double LastStatsUpdateTime = 0.0;
 
 #pragma endregion   
 
@@ -89,7 +69,6 @@ void UObjectPoolSubsystem::AddPool(const TSubclassOf<AActor> ClassPool, int32 In
                 const int32 AdditionalNeeded = InitialSize - CurrentTotal;
                 SpawnAndPlaceInPool(ClassPool, AdditionalNeeded, *ExistingPool);
                 ExistingPool->BaseSize = FMath::Max(ExistingPool->BaseSize, InitialSize);
-                UpdateStats();
             }
         }
         return;
@@ -98,28 +77,11 @@ void UObjectPoolSubsystem::AddPool(const TSubclassOf<AActor> ClassPool, int32 In
     // Create new pool
     FObjectPool ObjectPoolToCreate;
     ObjectPoolToCreate.BaseSize = InitialSize;
-    ObjectPoolToCreate.LastRequestTime = GetWorld()->GetTimeSeconds();
-    ObjectPoolToCreate.RecentRequestTimes.Empty();
 
     SpawnAndPlaceInPool(ClassPool, InitialSize, ObjectPoolToCreate);
 
     ObjectPoolMap.Add(ClassPool, ObjectPoolToCreate);
 
-    UpdateStats();
-}
-
-void UObjectPoolSubsystem::PrewarmPool(const TSubclassOf<AActor> ClassPool, int32 AdditionalSize)
-{
-    if (!GetWorld() || AdditionalSize <= 0)
-    {
-        return;
-    }
-
-    if (FObjectPool* PoolObject = ObjectPoolMap.Find(ClassPool))
-    {
-        SpawnAndPlaceInPool(ClassPool, AdditionalSize, *PoolObject);
-        UpdateStats();
-    }
 }
 
 TScriptInterface<IObjectPoolInterface> UObjectPoolSubsystem::GetObjectFromPool(const TSubclassOf<AActor> ClassPool)
@@ -147,7 +109,7 @@ TScriptInterface<IObjectPoolInterface> UObjectPoolSubsystem::GetObjectFromPool(c
     {
         RecordUsageAndMaybeGrow(ClassPool, *PoolObject);
 
-        TScriptInterface<IObjectPoolInterface> ActorToReturn = nullptr;
+        TScriptInterface<IObjectPoolInterface> ActorToReturn;
 
         if (PoolObject->UsablePoolingObjects.IsEmpty())
         {
@@ -179,8 +141,7 @@ TScriptInterface<IObjectPoolInterface> UObjectPoolSubsystem::GetObjectFromPool(c
 
         if (ActorToReturn.GetObject())
         {
-            PoolObject->ActivePoolingObjects.AddUnique(ActorToReturn);
-            UpdateStats();
+            PoolObject->ActivePoolingObjects.Add(ActorToReturn);
             return ActorToReturn;
         }
     }
@@ -213,15 +174,29 @@ void UObjectPoolSubsystem::ReturnObjectToPool(
 
     if (FObjectPool* PoolObject = ObjectPoolMap.Find(ClassPool))
     {
-        // Find an available position in the pool grid
-        int32 PoolIndex = PoolObject->UsablePoolingObjects.Num();
-        int32 GridX = PoolIndex % 10; // 10 objects per row
-        int32 GridY = PoolIndex / 10; // Row number
-        FVector PoolPosition = PoolVisualizationLocation + FVector(
-            GridX * PoolGridSpacing,
-            GridY * PoolGridSpacing,
-            0.0f
-        );
+        // SAFETY: prevent double return
+        if (!PoolObject->ActivePoolingObjects.Contains(ActorToReturn))
+        {
+            return;
+        }
+        
+        const UObjectPoolSettings* Settings = GetPoolSettings();
+        FVector PoolPosition = FVector::ZeroVector;
+
+#if WITH_EDITORONLY_DATA
+        if (Settings)
+        {
+            // Find an available position in the pool grid
+            int32 PoolIndex = PoolObject->UsablePoolingObjects.Num();
+            int32 GridX = PoolIndex % 10; // 10 objects per row
+            int32 GridY = PoolIndex / 10; // Row number
+            PoolPosition = Settings->PoolVisualizationLocation + FVector(
+                GridX * Settings->PoolGridSpacing,
+                GridY * Settings->PoolGridSpacing,
+                0.0f
+            );
+        }
+#endif
 
         // Create deactivation data
         FObjectPoolDeactivationData DeactivationData;
@@ -250,11 +225,9 @@ void UObjectPoolSubsystem::ReturnObjectToPool(
         }
 
         PoolObject->ActivePoolingObjects.RemoveSingleSwap(ActorToReturn);
-        PoolObject->UsablePoolingObjects.AddUnique(ActorToReturn);
+        PoolObject->UsablePoolingObjects.Add(ActorToReturn);
 
         MaybeShrinkPool(ClassPool, *PoolObject);
-
-        UpdateStats();
     }
 }
 
@@ -264,57 +237,173 @@ void UObjectPoolSubsystem::ReturnObjectToPool(
 
 void UObjectPoolSubsystem::UpdateStats()
 {
-    int32 TotalPools = ObjectPoolMap.Num();
-    int32 ActiveCount = 0;
-    int32 FreeCount = 0;
-
-    for (const auto& Pair : ObjectPoolMap)
-    {
-        ActiveCount += Pair.Value.ActivePoolingObjects.Num();
-        FreeCount   += Pair.Value.UsablePoolingObjects.Num();
-    }
-
-    SET_DWORD_STAT(STAT_ObjectPool_TotalPools, TotalPools);
-    SET_DWORD_STAT(STAT_ObjectPool_ActiveObjects, ActiveCount);
-    SET_DWORD_STAT(STAT_ObjectPool_FreeObjects, FreeCount);
+    // This function is now deprecated in favor of GetPoolStatistics() and GetPoolStatisticsAsStrings()
+    // Kept for backward compatibility if needed
 }
 
 TArray<FPoolStatistics> UObjectPoolSubsystem::GetPoolStatistics() const
 {
     TArray<FPoolStatistics> Statistics;
+    Statistics.Reserve(ObjectPoolMap.Num());
 
+    int32 Index = 0;
     for (const auto& Pair : ObjectPoolMap)
     {
         FPoolStatistics Stat;
         
-        // Get class name
+        // Set pool index (0-based)
+        Stat.PoolIndex = Index;
+        
+        // Get object name
         if (Pair.Key && Pair.Key.Get())
         {
-            Stat.ClassName = Pair.Key->GetName();
+            Stat.ObjectName = Pair.Key->GetName();
         }
         else
         {
-            Stat.ClassName = TEXT("Unknown");
+            Stat.ObjectName = TEXT("Unknown");
         }
 
-        // Get counts
-        Stat.ActiveObjects = Pair.Value.ActivePoolingObjects.Num();
-        Stat.PullableObjects = Pair.Value.UsablePoolingObjects.Num();
-        Stat.TotalObjects = Stat.ActiveObjects + Stat.PullableObjects;
+        // Get counts: InPool = available in pool, OutPool = active in scene
+        Stat.InPool = Pair.Value.UsablePoolingObjects.Num();
+        Stat.OutPool = Pair.Value.ActivePoolingObjects.Num();
+        Stat.Total = Stat.InPool + Stat.OutPool;
 
         Statistics.Add(Stat);
+        ++Index;
     }
 
     return Statistics;
+}
+
+TArray<FString> UObjectPoolSubsystem::GetPoolStatisticsAsStrings() const
+{
+    TArray<FString> OutputStrings;
+    
+    if (ObjectPoolMap.Num() == 0)
+    {
+        OutputStrings.Add(TEXT("No pools available"));
+        return OutputStrings;
+    }
+
+    // Header
+    OutputStrings.Add(TEXT("======================================== Object Pool Statistics ========================================"));
+    OutputStrings.Add(FString::Printf(TEXT("%-6s | %-32s | %-8s | %-8s | %-8s"), 
+        TEXT("Index"), TEXT("Object Name"), TEXT("In Pool"), TEXT("Out Pool"), TEXT("Total")));
+    OutputStrings.Add(TEXT("--------------------------------------------------------------------------------------------------------"));
+    
+    int32 ObjectsOutPool = 0;
+    int32 ObjectsInPool = 0;
+    
+    // Print each pool and accumulate totals
+    int32 Index = 0;
+    for (const auto& Pair : ObjectPoolMap)
+    {
+        FString ObjectName = TEXT("Unknown");
+        if (Pair.Key && Pair.Key.Get())
+        {
+            ObjectName = Pair.Key->GetName();
+        }
+
+        int32 InPool = Pair.Value.UsablePoolingObjects.Num();
+        int32 OutPool = Pair.Value.ActivePoolingObjects.Num();
+        int32 Total = InPool + OutPool;
+
+        // Print row
+        OutputStrings.Add(FString::Printf(TEXT("%-6d | %-32s | %-8d | %-8d | %-8d"), 
+            Index, *ObjectName, InPool, OutPool, Total));
+        
+        ObjectsOutPool += OutPool;
+        ObjectsInPool += InPool;
+        ++Index;
+    }
+
+    // Print footer with totals
+    OutputStrings.Add(TEXT("--------------------------------------------------------------------------------------------------------"));
+    OutputStrings.Add(FString::Printf(TEXT("%-6s | %-32s | %-8d | %-8d | %-8d"), 
+        TEXT("TOTAL"), TEXT(""), ObjectsInPool, ObjectsOutPool, ObjectsInPool + ObjectsOutPool));
+    OutputStrings.Add(TEXT("========================================================================================================"));
+    
+    return OutputStrings;
 }
 
 #pragma endregion 
 
 #pragma region HELPERS
 
+const UObjectPoolSettings* UObjectPoolSubsystem::GetPoolSettings() const
+{
+    return GetDefault<UObjectPoolSettings>();
+}
+
+void UObjectPoolSubsystem::RecordUsageAndMaybeGrow(
+    TSubclassOf<AActor> ClassPool,
+    FObjectPool& Pool)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    const UObjectPoolSettings* Settings = GetPoolSettings();
+    if (!Settings)
+    {
+        return;
+    }
+
+    const double Now = GetWorld()->GetTimeSeconds();
+
+    // Record this request
+    Pool.RecentRequestTimes.Add(Now);
+
+    // Clean old requests outside the window
+    const double WindowStart = Now - Settings->ConsumptionRateWindowSeconds;
+    Pool.RecentRequestTimes.RemoveAll([WindowStart](double Time) { return Time < WindowStart; });
+
+    // Calculate consumption rate (objects per second)
+    const int32 RequestsInWindow = Pool.RecentRequestTimes.Num();
+    if (RequestsInWindow == 0 || Settings->ConsumptionRateWindowSeconds <= 0.0f)
+    {
+        return;
+    }
+
+    const float ConsumptionRate = static_cast<float>(RequestsInWindow) / Settings->ConsumptionRateWindowSeconds;
+    
+    const int32 FreeCount = Pool.UsablePoolingObjects.Num();
+    if (FreeCount <= 0 || ConsumptionRate <= 0.0f)
+    {
+        return;
+    }
+
+    // Calculate time to exhaustion: FreeCount / ConsumptionRate
+    const float TimeToExhaustion = static_cast<float>(FreeCount) / ConsumptionRate;
+
+    // GROW if time to exhaustion is below minimum threshold
+    if (TimeToExhaustion < Settings->MinExhaustionTimeSeconds)
+    {
+        // Calculate desired free count to maintain minimum exhaustion time
+        const float DesiredFreeCount = ConsumptionRate * Settings->MinExhaustionTimeSeconds;
+        const int32 ToSpawn = FMath::Max(
+            Settings->MinObjectsToAdd,
+            FMath::CeilToInt(DesiredFreeCount - FreeCount)
+        );
+
+        if (ToSpawn > 0)
+        {
+            SpawnAndPlaceInPool(ClassPool, ToSpawn, Pool);
+        }
+    }
+}
+
 void UObjectPoolSubsystem::SpawnAndPlaceInPool(const TSubclassOf<AActor> ClassPool, int32 Count, FObjectPool& Pool)
 {
     if (!GetWorld() || Count <= 0)
+    {
+        return;
+    }
+
+    const UObjectPoolSettings* Settings = GetPoolSettings();
+    if (!Settings)
     {
         return;
     }
@@ -331,20 +420,22 @@ void UObjectPoolSubsystem::SpawnAndPlaceInPool(const TSubclassOf<AActor> ClassPo
         
         if (ActorRef && ActorRef->Implements<UObjectPoolInterface>())
         {
+#if WITH_EDITORONLY_DATA
             int32 GlobalIndex = StartIndex + i;
             int32 GridX = GlobalIndex % 10; // 10 objects per row
             int32 GridY = GlobalIndex / 10; // Row number
-            FVector PoolPosition = PoolVisualizationLocation + FVector(
-                GridX * PoolGridSpacing,
-                GridY * PoolGridSpacing,
+            FVector PoolPosition = Settings->PoolVisualizationLocation + FVector(
+                GridX * Settings->PoolGridSpacing,
+                GridY * Settings->PoolGridSpacing,
                 0.0f
             );
 
             ActorRef->SetActorLocation(PoolPosition);
+#endif
             ActorRef->SetActorHiddenInGame(false);
             ActorRef->SetActorEnableCollision(false);
 
-            Pool.UsablePoolingObjects.AddUnique(ActorRef);
+            Pool.UsablePoolingObjects.Add(ActorRef);
         }
         else
         {
@@ -357,80 +448,99 @@ void UObjectPoolSubsystem::SpawnAndPlaceInPool(const TSubclassOf<AActor> ClassPo
     }
 }
 
-void UObjectPoolSubsystem::RecordUsageAndMaybeGrow(TSubclassOf<AActor> ClassPool, FObjectPool& Pool)
+void UObjectPoolSubsystem::MaybeShrinkPool(
+    TSubclassOf<AActor> ClassPool,
+    FObjectPool& Pool)
 {
     if (!GetWorld())
     {
         return;
     }
 
-    const double Now = GetWorld()->GetTimeSeconds();
-    Pool.LastRequestTime = Now;
-    Pool.RecentRequestTimes.Add(Now);
-
-    // Clean old entries
-    const double WindowStart = Now - AutoScaleWindowSeconds;
-    Pool.RecentRequestTimes.RemoveAll([WindowStart](double T) { return T < WindowStart; });
-
-    const int32 RequestsInWindow = Pool.RecentRequestTimes.Num();
-    if (RequestsInWindow == 0 || AutoScaleWindowSeconds <= 0.01f)
+    const UObjectPoolSettings* Settings = GetPoolSettings();
+    if (!Settings)
     {
         return;
     }
 
-    const float Rate = static_cast<float>(RequestsInWindow) / AutoScaleWindowSeconds; // requests per second
     const int32 FreeCount = Pool.UsablePoolingObjects.Num();
+    const int32 ActiveCount = Pool.ActivePoolingObjects.Num();
+    const int32 TotalCount = FreeCount + ActiveCount;
 
-    if (Rate <= 0.0f)
-    {
-        return;
-    }
-
-    const float ProjectedExhaustion = (Rate > 0.0f) ? (FreeCount / Rate) : FLT_MAX;
-
-    if (ProjectedExhaustion < AutoScaleLookaheadSeconds)
-    {
-        // Estimate how many we need to cover the lookahead plus a small buffer
-        const int32 NeededToCover = FMath::CeilToInt(Rate * AutoScaleLookaheadSeconds) - FreeCount;
-        const int32 SpawnCount = FMath::Max(NeededToCover, AutoScaleMinAdd);
-        SpawnAndPlaceInPool(ClassPool, SpawnCount, Pool);
-    }
-}
-
-void UObjectPoolSubsystem::MaybeShrinkPool(TSubclassOf<AActor> ClassPool, FObjectPool& Pool)
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-
-    const double Now = GetWorld()->GetTimeSeconds();
-    const double TimeSinceLastRequest = Now - Pool.LastRequestTime;
-
-    const int32 TotalCount = Pool.UsablePoolingObjects.Num() + Pool.ActivePoolingObjects.Num();
+    // Never shrink below base size
     if (TotalCount <= Pool.BaseSize)
     {
         return;
     }
 
-    if (TimeSinceLastRequest < InactivityShrinkSeconds)
+    const double Now = GetWorld()->GetTimeSeconds();
+    
+    // Clean old requests to calculate current consumption rate
+    const double WindowStart = Now - Settings->ConsumptionRateWindowSeconds;
+    Pool.RecentRequestTimes.RemoveAll([WindowStart](double Time) { return Time < WindowStart; });
+
+    const int32 RequestsInWindow = Pool.RecentRequestTimes.Num();
+    if (RequestsInWindow == 0 || Settings->ConsumptionRateWindowSeconds <= 0.0f)
+    {
+        // No recent activity, shrink towards base size
+        const int32 Excess = TotalCount - Pool.BaseSize;
+        const int32 ToDestroy = FMath::Min(Excess, FreeCount);
+
+        for (int32 i = 0; i < ToDestroy; ++i)
+        {
+            const int32 Index = Pool.UsablePoolingObjects.Num() - 1;
+            if (Index < 0) break;
+
+            TScriptInterface<IObjectPoolInterface> Obj = Pool.UsablePoolingObjects[Index];
+            Pool.UsablePoolingObjects.RemoveAt(Index);
+
+            if (AActor* Actor = Cast<AActor>(Obj.GetObject()))
+            {
+                Actor->Destroy();
+            }
+        }
+        return;
+    }
+
+    // Calculate current consumption rate
+    const float ConsumptionRate = static_cast<float>(RequestsInWindow) / Settings->ConsumptionRateWindowSeconds;
+    
+    if (FreeCount <= 0 || ConsumptionRate <= 0.0f)
     {
         return;
     }
 
-    // Destroy surplus from the usable list only
-    const int32 Surplus = TotalCount - Pool.BaseSize;
-    int32 ToRemove = FMath::Min(Surplus, Pool.UsablePoolingObjects.Num());
+    // Calculate time to exhaustion
+    const float TimeToExhaustion = static_cast<float>(FreeCount) / ConsumptionRate;
 
-    for (int32 i = 0; i < ToRemove; ++i)
+    // SHRINK if time to exhaustion is above maximum threshold
+    if (TimeToExhaustion > Settings->MaxExhaustionTimeSeconds)
     {
-        const int32 Index = Pool.UsablePoolingObjects.Num() - 1;
-        TScriptInterface<IObjectPoolInterface> Obj = Pool.UsablePoolingObjects[Index];
-        Pool.UsablePoolingObjects.RemoveAt(Index);
+        // Calculate desired free count based on target exhaustion time
+        const float DesiredFreeCount = ConsumptionRate * Settings->TargetExhaustionTimeSeconds;
+        
+        // Ensure we never go below base size
+        const int32 MinFreeCount = FMath::Max(0, Pool.BaseSize - ActiveCount);
+        const int32 TargetFreeCount = FMath::Max(
+            MinFreeCount,
+            FMath::CeilToInt(DesiredFreeCount)
+        );
 
-        if (AActor* Actor = Cast<AActor>(Obj.GetObject()))
+        const int32 Excess = FreeCount - TargetFreeCount;
+        const int32 ToDestroy = FMath::Clamp(Excess, 0, FreeCount);
+
+        for (int32 i = 0; i < ToDestroy; ++i)
         {
-            Actor->Destroy();
+            const int32 Index = Pool.UsablePoolingObjects.Num() - 1;
+            if (Index < 0) break;
+
+            TScriptInterface<IObjectPoolInterface> Obj = Pool.UsablePoolingObjects[Index];
+            Pool.UsablePoolingObjects.RemoveAt(Index);
+
+            if (AActor* Actor = Cast<AActor>(Obj.GetObject()))
+            {
+                Actor->Destroy();
+            }
         }
     }
 }

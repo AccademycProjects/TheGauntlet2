@@ -19,7 +19,8 @@ public class TheGauntlet2 : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
-			"CommonUI"
+			"CommonUI",
+			"DeveloperSettings"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

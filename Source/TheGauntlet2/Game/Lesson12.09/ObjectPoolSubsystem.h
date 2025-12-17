@@ -16,26 +16,21 @@ struct FObjectPool
 {
 	GENERATED_BODY()
 
-	/** Desired base size of the pool (initial size) */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Object Pool Struct")
+	/** Desired base size of the pool (minimum size, never goes below this) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool")
 	int32 BaseSize = 0;
 
-	/** Last time (seconds) a request for this pool was made */
-	UPROPERTY()
-	double LastRequestTime = 0.0;
-
-	/** Recent request timestamps used to estimate demand */
+	/** Timestamps of recent requests (for calculating consumption rate) */
 	UPROPERTY()
 	TArray<double> RecentRequestTimes;
 
-	// Array with the pointers of the USABLE objects IN this pool
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Object Pool Struct")
+	/** Usable objects in pool */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool")
 	TArray<TScriptInterface<IObjectPoolInterface>> UsablePoolingObjects;
 
-	// Array with the pointers of the ACTIVE IN SCENE objects FROM this pool
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Object Pool Struct")
+	/** Active objects out of pool */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool")
 	TArray<TScriptInterface<IObjectPoolInterface>> ActivePoolingObjects;
-
 };
 
 /** Struct to hold pool statistics for a class */
@@ -44,17 +39,25 @@ struct FPoolStatistics
 {
 	GENERATED_BODY()
 
+	/** Index of the pool in the list */
 	UPROPERTY(BlueprintReadOnly, Category = "Pool Statistics")
-	FString ClassName;
+	int32 PoolIndex = 0;
 
+	/** Name of the object class */
 	UPROPERTY(BlueprintReadOnly, Category = "Pool Statistics")
-	int32 ActiveObjects = 0;
+	FString ObjectName;
 
+	/** Number of objects currently in the pool (available) */
 	UPROPERTY(BlueprintReadOnly, Category = "Pool Statistics")
-	int32 PullableObjects = 0;
+	int32 InPool = 0;
 
+	/** Number of objects currently out of the pool (active) */
 	UPROPERTY(BlueprintReadOnly, Category = "Pool Statistics")
-	int32 TotalObjects = 0;
+	int32 OutPool = 0;
+
+	/** Total number of objects (InPool + OutPool) */
+	UPROPERTY(BlueprintReadOnly, Category = "Pool Statistics")
+	int32 Total = 0;
 };
 
 UCLASS()
@@ -71,10 +74,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	void AddPool(TSubclassOf<AActor> ClassPool, int32 InitialSize = 50);
 
-	/** Force a pre-warm/resize for a given class */
-	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
-	void PrewarmPool(TSubclassOf<AActor> ClassPool, int32 AdditionalSize);
-
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	TScriptInterface<IObjectPoolInterface> GetObjectFromPool(TSubclassOf<AActor> ClassPool);
 
@@ -82,35 +81,19 @@ public:
 	void ReturnObjectToPool(TSubclassOf<AActor> ClassPool, TScriptInterface<IObjectPoolInterface> ActorToReturn);
 	
 	void UpdateStats();
+	
+	/** Get the Object Pool Settings */
+	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
+	const UObjectPoolSettings* GetPoolSettings() const;
 
-	/** Base location for the pool visualization in the scene */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
-	FVector PoolVisualizationLocation = FVector(0.0f, 0.0f, 100.0f);
-
-	/** Spacing between pooled objects in the visualization grid */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
-	float PoolGridSpacing = 200.0f;
-
-	/** Time window (seconds) to estimate request rate */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
-	float AutoScaleWindowSeconds = 2.0f;
-
-	/** Look-ahead time (seconds) to pre-allocate before exhaustion */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
-	float AutoScaleLookaheadSeconds = 1.0f;
-
-	/** Minimum number of objects to add when scaling up */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
-	int32 AutoScaleMinAdd = 5;
-
-	/** Seconds of inactivity before shrinking back toward the base size */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Object Pool SubSystem")
-	float InactivityShrinkSeconds = 10.0f;
-
-	/** Get statistics for all pools */
+	/** Get pool statistics as structured data */
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	TArray<FPoolStatistics> GetPoolStatistics() const;
 
+	/** Get pool statistics as formatted strings (one string per row) */
+	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
+	TArray<FString> GetPoolStatisticsAsStrings() const;
+	
 private:
 	// Check if a class implements the ObjectPoolInterface
 	bool DoesClassImplementInterface(TSubclassOf<AActor> ClassPool) const;
