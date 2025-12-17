@@ -80,8 +80,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	void ReturnObjectToPool(TSubclassOf<AActor> ClassPool, TScriptInterface<IObjectPoolInterface> ActorToReturn);
 	
-	void UpdateStats();
-	
 	/** Get the Object Pool Settings */
 	UFUNCTION(BlueprintCallable, Category = "Object Pool SubSystem")
 	const UObjectPoolSettings* GetPoolSettings() const;

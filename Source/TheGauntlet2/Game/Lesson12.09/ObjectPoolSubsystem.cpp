@@ -235,12 +235,6 @@ void UObjectPoolSubsystem::ReturnObjectToPool(
 
 #pragma region STATS UPDATE
 
-void UObjectPoolSubsystem::UpdateStats()
-{
-    // This function is now deprecated in favor of GetPoolStatistics() and GetPoolStatisticsAsStrings()
-    // Kept for backward compatibility if needed
-}
-
 TArray<FPoolStatistics> UObjectPoolSubsystem::GetPoolStatistics() const
 {
     TArray<FPoolStatistics> Statistics;
